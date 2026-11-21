@@ -30,15 +30,26 @@
     tops = secs.map(function (s) { var r = s.getBoundingClientRect(); return r.top + window.scrollY; });
     hs = secs.map(function (s) { return s.offsetHeight; });
   }
-  window.addEventListener('resize', measure); window.addEventListener('load', measure); measure();
+  var lastW = window.innerWidth, lastH = window.innerHeight, dirty = true;
+  function onResize() {
+    var w = window.innerWidth, h = window.innerHeight;
+    if (w === lastW && Math.abs(h - lastH) < 160) return; /* Adressleiste auf dem Handy: nicht neu messen */
+    lastW = w; lastH = h; measure(); dirty = true;
+  }
+  window.addEventListener('resize', onResize); window.addEventListener('load', function () { measure(); dirty = true; }); measure();
+  window.addEventListener('load', function () { imgs.forEach(function (im) { if (im && im.decode) im.decode().catch(function () {}); }); });
+  var coarse = window.matchMedia && matchMedia('(pointer: coarse)').matches;
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(function () { measure(); dirty = true; });
   var mx = 0, my = 0, tmx = 0, tmy = 0;
   window.addEventListener('pointermove', function (e) { tmx = e.clientX / window.innerWidth * 2 - 1; tmy = e.clientY / window.innerHeight * 2 - 1; }, { passive: true });
   var t0 = performance.now();
   function stage(now) {
-    var target = window.scrollY, k = reduce ? 1 : 0.1;
+    var target = window.scrollY, k = reduce ? 1 : (coarse ? 0.22 : 0.1);
     ys += (target - ys) * k;
     mx += (tmx - mx) * 0.05; my += (tmy - my) * 0.05;
     var intro = reduce ? 1 : smooth(0, 2.6, (now - t0) / 1000);
+    /* Leerlauf: nichts bewegt sich -> nichts neu berechnen (spart Akku) */
+    dirty = false;
     if (!hasStage) { bar.style.width = (clamp(ys / Math.max(1, docH - vh), 0, 1) * 100) + '%'; requestAnimationFrame(stage); return; }
     var W = window.innerWidth, H = vh, off = H * 0.24, bw = Math.max(20, W * 0.045), us = [], active = -1;
     for (var i = 0; i < secs.length; i++) {
@@ -50,15 +61,18 @@
       if (u > 0 && u < 1 && active < 0) active = si;
       var z = 1.05 + t * 0.13 + (1 - intro) * 0.08 + (1 - u) * 0.1;
       var ty = (0.5 - t) * 3.2;
-      imgs[si].style.transform = 'translate3d(' + (mx * -10) + 'px,' + ((my * -8) + ty * vh / 100) + 'px,0) scale(' + z.toFixed(4) + ')';
+      if (u > 0 && !(us[si + 1] >= 1)) {
+        var tt = reduce ? 0 : now / 1000, dx = Math.sin(tt / 9 + si * 1.7) * 14, dy = Math.cos(tt / 11 + si) * 9, dz = 1 + (Math.sin(tt / 13 + si) * 0.5 + 0.5) * 0.03;
+        imgs[si].style.transform = 'translate3d(' + (mx * -10 + dx).toFixed(2) + 'px,' + ((my * -8) + ty * vh / 100 + dy).toFixed(2) + 'px,0) scale(' + (z * dz).toFixed(4) + ')';
+      }
     }
     for (var k2 = 0; k2 < scenes.length; k2++) {
       var u2 = us[k2], el = scenes[k2], covered = us[k2 + 1] >= 1;
-      if (covered || u2 <= 0) { el.style.visibility = 'hidden'; continue; }
-      el.style.visibility = 'visible';
-      if (u2 >= 1) { el.style.clipPath = 'none'; continue; }
+      if (covered || u2 <= 0) { if (el._v !== 'hidden') { el.style.visibility = 'hidden'; el._v = 'hidden'; } continue; }
+      if (el._v !== 'visible') { el.style.visibility = 'visible'; el._v = 'visible'; }
+      if (u2 >= 1) { if (el._c !== 'none') { el.style.clipPath = 'none'; el._c = 'none'; } continue; }
       var x = -off + u2 * (W + 2 * off);
-      el.style.clipPath = 'polygon(0 0,' + (x + off).toFixed(1) + 'px 0,' + (x - off).toFixed(1) + 'px ' + H + 'px,0 ' + H + 'px)';
+      el.style.clipPath = el._c = 'polygon(0 0,' + (x + off).toFixed(1) + 'px 0,' + (x - off).toFixed(1) + 'px ' + H + 'px,0 ' + H + 'px)';
     }
     if (active >= 0) {
       var ua = us[active], xa = -off + ua * (W + 2 * off), fade = Math.min(1, ua * 10, (1 - ua) * 10);
